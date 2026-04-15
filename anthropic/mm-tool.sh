@@ -5,39 +5,40 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
 MODEL="${MODEL:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Set to a remote URL or a local file path (auto base64-encoded)
-IMAGE_URL="https://ts2.tc.mm.bing.net/th/id/OIP-C.t5-jvEoV-rIvVITQKV02jQHaEo?rs=1&pid=ImgDetMain&o=7&rm=3"
+source "${SCRIPT_DIR}/../lib/image-source.sh"
+source "${SCRIPT_DIR}/../lib/anthropic-messages-sse.sh"
 
-if [[ -z "$BASE_URL" ]]; then
-  echo "[error] BASE_URL is not set" >&2
-  exit 1
-fi
+# Set to a remote URL or a local file path
+IMAGE="resources/Sydney-Opera-House.jpg"
 
-if [[ -z "$API_KEY" ]]; then
-  echo "[error] API_KEY is not set" >&2
-  exit 1
-fi
+require_bin() {
+  local bin="$1"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "[error] Missing dependency: $bin" >&2
+    exit 1
+  fi
+}
 
-if [[ -z "$MODEL" ]]; then
-  echo "[error] MODEL is not set" >&2
-  exit 1
-fi
+require_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "[error] ${name} is not set" >&2
+    exit 1
+  fi
+}
+
+require_bin curl
+require_bin jq
+require_env BASE_URL
+require_env API_KEY
+require_env MODEL
 
 # ── Handle local file or remote URL → base64 ─────────────────────────────────
-if [[ -f "$IMAGE_URL" ]]; then
-  image_media_type=$(file -b --mime-type "$IMAGE_URL")
-  image_data=$(base64 -w0 "$IMAGE_URL")
-  echo "[info] Encoded local file as base64 (${image_media_type})"
-else
-  echo "[info] Downloading remote image for base64 encoding..."
-  tmp_img=$(mktemp /tmp/llm_img_XXXXXX)
-  curl -sL "$IMAGE_URL" -o "$tmp_img"
-  image_media_type=$(file -b --mime-type "$tmp_img")
-  image_data=$(base64 -w0 "$tmp_img")
-  rm -f "$tmp_img"
-  echo "[info] Downloaded and encoded (${image_media_type})"
-fi
+prepare_image_base64_parts "$IMAGE"
+IMAGE_DATA_FILE="$(mktemp /tmp/anthropic_image_data_XXXXXX.txt)"
+printf '%s' "$IMAGE_BASE64_DATA" > "$IMAGE_DATA_FILE"
 
 # ── Build JSON payload (via jq for safe escaping) ────────────────────────────
 # Mimics an agent conversation:
@@ -45,13 +46,18 @@ fi
 #   2. Assistant responds with a tool_call to read_image
 #   3. Tool result returns the image content
 #   4. LLM is expected to describe the image
-PAYLOAD=$(mktemp /tmp/llm_payload_XXXXXX.json)
-trap 'rm -f "$PAYLOAD"' EXIT
+PAYLOAD_FILE="$(mktemp /tmp/anthropic_messages_payload_XXXXXX.json)"
+RAW_STREAM_FILE="$(mktemp /tmp/anthropic_messages_stream_XXXXXX.log)"
+HEADERS_FILE="$(mktemp /tmp/anthropic_messages_headers_XXXXXX.log)"
+cleanup() {
+  rm -f "$IMAGE_DATA_FILE" "$PAYLOAD_FILE" "$RAW_STREAM_FILE" "$HEADERS_FILE"
+}
+trap cleanup EXIT
 
 jq -n \
   --arg model        "$MODEL" \
-  --arg image_media  "$image_media_type" \
-  --arg image_data   "$image_data" \
+  --arg image_media  "$IMAGE_MEDIA_TYPE" \
+  --rawfile image_data "$IMAGE_DATA_FILE" \
   '{
     model: $model,
     max_tokens: 4096,
@@ -107,34 +113,51 @@ jq -n \
         ]
       }
     ]
-  }' > "$PAYLOAD"
+  }' > "$PAYLOAD_FILE"
 
 # ── Print request summary ───────────────────────────────────────────────────
 echo "=== Request ==="
-echo "  Endpoint : ${BASE_URL}/messages"
-echo "  Model    : ${MODEL}"
-echo "  Image    : $(if [[ -f "$IMAGE_URL" ]]; then echo '(base64 local file)'; else echo "$IMAGE_URL (downloaded & base64)"; fi)"
-echo ""
+echo "Endpoint          : ${BASE_URL}/messages"
+echo "Model             : ${MODEL}"
+echo "Image             : ${IMAGE_SOURCE_SUMMARY}"
+echo
 
 # ── Call API (stream SSE) ───────────────────────────────────────────────────
-echo "=== Response ==="
-curl -sN "${BASE_URL}/messages" \
+echo "=== Raw Stream ==="
+curl -sS -N \
+  -D "$HEADERS_FILE" \
+  -o >(tee "$RAW_STREAM_FILE") \
+  "${BASE_URL}/messages" \
   -H "Content-Type: application/json" \
   -H "x-api-key: ${API_KEY}" \
   -H "anthropic-version: 2023-06-01" \
-  -d @"$PAYLOAD" | while IFS= read -r line; do
-  # Anthropic SSE format: "event: ..." followed by "data: {...}" or "data:{...}"
-  [[ "$line" != data:* ]] && continue
-  payload="${line#data:}"
-  # strip optional leading space
-  payload="${payload# }"
-  # Extract the delta text from content_block_delta events
-  token=$(echo "$payload" | jq -r '
-    if .type == "content_block_delta" and .delta.type == "text_delta" then
-      .delta.text
-    else
-      empty
-    end
-  ' 2>/dev/null) && printf '%s' "$token"
-done
+  -d @"$PAYLOAD_FILE"
+echo
+echo
+
+HTTP_CODE="$(awk 'toupper($1) ~ /^HTTP/ { code = $2 } END { print code }' "$HEADERS_FILE")"
+
+if [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+  echo "[error] HTTP ${HTTP_CODE}" >&2
+  exit 1
+fi
+
+SUMMARY_JSON="$(anthropic_messages_sse_to_summary "$RAW_STREAM_FILE")"
+anthropic_messages_assert_summary_ok "$SUMMARY_JSON"
+
+echo "=== Aggregated LLM Response ==="
+anthropic_messages_print_aggregated_response "$SUMMARY_JSON"
+echo
+echo
+
+echo "=== Metadata ==="
+anthropic_messages_print_metadata "$SUMMARY_JSON"
+echo
+
+echo "=== Usage ==="
+anthropic_messages_print_usage "$SUMMARY_JSON"
+echo
+
+echo "=== Tool Uses ==="
+anthropic_messages_print_tool_uses "$SUMMARY_JSON"
 echo
