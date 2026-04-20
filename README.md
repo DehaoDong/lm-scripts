@@ -37,7 +37,8 @@ Each example prints:
 │   ├── chat-completions/
 │   │   ├── hello.sh
 │   │   ├── mm.sh
-│   │   └── mm-tool.sh
+│   │   ├── mm-tool.sh
+│   │   └── system-last.sh
 │   └── responses/
 │       ├── hello.sh
 │       ├── mm.sh
@@ -125,6 +126,8 @@ bash anthropic/list-models.sh
   Simulates an image-reading workflow where the image is sent in a later `user` message.
 - `openai/chat-completions/mm-tool.sh`
   Simulates the same workflow, but returns the image in a `tool` message.
+- `openai/chat-completions/system-last.sh`
+  Text-only streaming request that intentionally places the `system` message last in `messages`.
 
 ### OpenAI Responses
 
