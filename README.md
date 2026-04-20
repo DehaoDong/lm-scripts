@@ -63,8 +63,8 @@ All scripts expect these variables:
 Examples:
 
 ```bash
-export BASE_URL=https://api.openai.com/v1
-export API_KEY=your_api_key
+export BASE_URL=https://api.openai.com/v1 && \
+export API_KEY=your_api_key && \
 export MODEL=gpt-4.1
 ```
 
