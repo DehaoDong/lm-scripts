@@ -24,6 +24,7 @@ Each example prints:
 .
 ├── anthropic/
 │   ├── hello.sh
+│   ├── list-models.sh
 │   ├── mm.sh
 │   └── mm-tool.sh
 ├── lib/
@@ -32,6 +33,7 @@ Each example prints:
 │   ├── openai-chat-completions-sse.sh
 │   └── openai-responses-sse.sh
 ├── openai/
+│   ├── list-models.sh
 │   ├── chat-completions/
 │   │   ├── hello.sh
 │   │   ├── mm.sh
@@ -58,7 +60,9 @@ All scripts expect these variables:
 
 - `BASE_URL`: provider base URL including the version prefix, for example `https://api.openai.com/v1`
 - `API_KEY`: provider API key
-- `MODEL`: model name to send in the request
+- `MODEL`: model name to send in generation requests
+
+`MODEL` is not required for the `list-models.sh` scripts.
 
 Examples:
 
@@ -95,10 +99,23 @@ bash openai/responses/hello.sh
 ```
 
 ```bash
+bash openai/list-models.sh
+```
+
+```bash
 bash anthropic/hello.sh
 ```
 
+```bash
+bash anthropic/list-models.sh
+```
+
 ## Scripts
+
+### OpenAI
+
+- `openai/list-models.sh`
+  Lists models from `${BASE_URL}/models` using OpenAI bearer auth.
 
 ### OpenAI Chat Completions
 
@@ -120,6 +137,8 @@ bash anthropic/hello.sh
 
 ### Anthropic Messages
 
+- `anthropic/list-models.sh`
+  Lists models from `${BASE_URL}/models` using Anthropic auth/version headers.
 - `anthropic/hello.sh`
   Text-only streaming request to `${BASE_URL}/messages`.
 - `anthropic/mm.sh`
@@ -148,3 +167,5 @@ Most scripts print sections in this order:
 6. `=== Tool Calls ===`, `=== Function Calls ===`, or `=== Tool Uses ===`
 
 The parsing helpers in [`lib/openai-chat-completions-sse.sh`](lib/openai-chat-completions-sse.sh), [`lib/openai-responses-sse.sh`](lib/openai-responses-sse.sh), and [`lib/anthropic-messages-sse.sh`](lib/anthropic-messages-sse.sh) collapse raw SSE events into a single summary JSON object before printing the readable sections.
+
+The `list-models.sh` scripts are non-streaming and print `=== Raw Response ===`, `=== Models ===`, and `=== Metadata ===` instead.
