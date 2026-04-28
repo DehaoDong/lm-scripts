@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/../lib/image-source.sh"
 source "${SCRIPT_DIR}/../lib/anthropic-messages-sse.sh"
+source "${SCRIPT_DIR}/../lib/thinking.sh"
 
 # Set to a remote URL or a local file path
 IMAGE="https://ts2.tc.mm.bing.net/th/id/OIP-C.t5-jvEoV-rIvVITQKV02jQHaEo?rs=1&pid=ImgDetMain&o=7&rm=3"
@@ -35,6 +36,8 @@ require_env BASE_URL
 require_env API_KEY
 require_env MODEL
 
+THINKING_OVERRIDES_JSON="$(thinking_overrides_json)"
+
 # ── Handle local file or remote URL → base64 ─────────────────────────────────
 prepare_image_base64_parts "$IMAGE"
 IMAGE_DATA_FILE="$(mktemp /tmp/anthropic_image_data_XXXXXX.txt)"
@@ -51,9 +54,10 @@ trap cleanup EXIT
 
 jq -n \
   --arg model       "$MODEL" \
+  --argjson thinking_overrides "$THINKING_OVERRIDES_JSON" \
   --arg image_media "$IMAGE_MEDIA_TYPE" \
   --rawfile image_data "$IMAGE_DATA_FILE" \
-  '{
+  '({
     model: $model,
     max_tokens: 4096,
     stream: true,
@@ -74,13 +78,14 @@ jq -n \
         ]
       }
     ]
-  }' > "$PAYLOAD_FILE"
+  } + $thinking_overrides)' > "$PAYLOAD_FILE"
 
 # ── Print request summary ───────────────────────────────────────────────────
 echo "=== Request ==="
 echo "Endpoint          : ${BASE_URL}/messages"
 echo "Model             : ${MODEL}"
 echo "Image             : ${IMAGE_SOURCE_SUMMARY}"
+echo "Thinking          : $(thinking_status_label)"
 echo
 
 # ── Call API (stream SSE) ───────────────────────────────────────────────────

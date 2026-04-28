@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/../../lib/image-source.sh"
 source "${SCRIPT_DIR}/../../lib/openai-chat-completions-sse.sh"
+source "${SCRIPT_DIR}/../../lib/thinking.sh"
 
 # Set to a remote URL or a local file path
 IMAGE="https://ts1.tc.mm.bing.net/th/id/OIP-C.0-YVnXaHj82gSvdAQXFMrgHaFb?rs=1&pid=ImgDetMain&o=7&rm=3"
@@ -34,6 +35,8 @@ require_env BASE_URL
 require_env API_KEY
 require_env MODEL
 
+THINKING_OVERRIDES_JSON="$(thinking_overrides_json)"
+
 # ── Handle local file or remote URL → base64 data URI ────────────────────────
 prepare_image_data_url "$IMAGE"
 IMAGE_URL_FILE="$(mktemp /tmp/openai_image_url_XXXXXX.txt)"
@@ -49,9 +52,10 @@ trap cleanup EXIT
 
 jq -n \
   --arg model "$MODEL" \
+  --argjson thinking_overrides "$THINKING_OVERRIDES_JSON" \
   --rawfile image_url "$IMAGE_URL_FILE" \
   '
-  {
+  ({
     model: $model,
     stream: true,
     stream_options: {
@@ -86,13 +90,14 @@ jq -n \
         ]
       }
     ]
-  }
+  } + $thinking_overrides)
   ' > "$PAYLOAD_FILE"
 
 echo "=== Request ==="
 echo "Endpoint          : ${BASE_URL}/chat/completions"
 echo "Model             : ${MODEL}"
 echo "Image             : ${IMAGE_SOURCE_SUMMARY}"
+echo "Thinking          : $(thinking_status_label)"
 echo
 
 echo "=== Raw Stream ==="

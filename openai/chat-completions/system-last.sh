@@ -7,6 +7,7 @@ MODEL="${MODEL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/../../lib/openai-chat-completions-sse.sh"
+source "${SCRIPT_DIR}/../../lib/thinking.sh"
 
 require_bin() {
   local bin="$1"
@@ -30,6 +31,8 @@ require_env BASE_URL
 require_env API_KEY
 require_env MODEL
 
+THINKING_OVERRIDES_JSON="$(thinking_overrides_json)"
+
 PAYLOAD_FILE="$(mktemp /tmp/chat_completions_payload_XXXXXX.json)"
 RAW_STREAM_FILE="$(mktemp /tmp/chat_completions_stream_XXXXXX.log)"
 HEADERS_FILE="$(mktemp /tmp/chat_completions_headers_XXXXXX.log)"
@@ -41,8 +44,9 @@ trap cleanup EXIT
 # This example intentionally places the system message last in the array.
 jq -n \
   --arg model "$MODEL" \
+  --argjson thinking_overrides "$THINKING_OVERRIDES_JSON" \
   '
-  {
+  ({
     model: $model,
     stream: true,
     stream_options: {
@@ -58,12 +62,13 @@ jq -n \
         content: "You are a precise assistant. Follow this system message even though it appears last in the messages array. Reply with the exact text: system message is last."
       }
     ]
-  }
+  } + $thinking_overrides)
   ' > "$PAYLOAD_FILE"
 
 echo "=== Request ==="
 echo "Endpoint          : ${BASE_URL}/chat/completions"
 echo "Model             : ${MODEL}"
+echo "Thinking          : $(thinking_status_label)"
 echo
 
 echo "=== Raw Stream ==="

@@ -65,6 +65,10 @@ All scripts expect these variables:
 
 `MODEL` is not required for the `list-models.sh` scripts.
 
+Optional generation variables:
+
+- `ENABLE_THINKING`: defaults to `false`. Set `1`, `true`, `yes`, or `on` to request thinking/reasoning output.
+
 Examples:
 
 ```bash
@@ -85,6 +89,16 @@ You can also point `BASE_URL` at a compatible local gateway, for example:
 export BASE_URL=http://localhost:10000/v1
 export API_KEY=xxx
 export MODEL=Qwen3.5-4B
+```
+
+Thinking examples:
+
+```bash
+ENABLE_THINKING=1 bash openai/chat-completions/hello.sh
+```
+
+```bash
+ENABLE_THINKING=1 bash anthropic/hello.sh
 ```
 
 ## Quick Start
@@ -170,5 +184,7 @@ Most scripts print sections in this order:
 6. `=== Tool Calls ===`, `=== Function Calls ===`, or `=== Tool Uses ===`
 
 The parsing helpers in [`lib/openai-chat-completions-sse.sh`](lib/openai-chat-completions-sse.sh), [`lib/openai-responses-sse.sh`](lib/openai-responses-sse.sh), and [`lib/anthropic-messages-sse.sh`](lib/anthropic-messages-sse.sh) collapse raw SSE events into a single summary JSON object before printing the readable sections.
+
+All generation scripts send exactly these thinking-control fields in the request body: `enable_thinking` and `chat_template_kwargs.enable_thinking`. The default value is `false`, and setting `ENABLE_THINKING=1` switches both to `true`.
 
 The `list-models.sh` scripts are non-streaming and print `=== Raw Response ===`, `=== Models ===`, and `=== Metadata ===` instead.
