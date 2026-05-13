@@ -1,6 +1,6 @@
 # lm-scripts
 
-Small Bash examples for streaming LLM APIs and turning raw SSE output into a readable summary.
+Small standalone Bash examples for streaming LLM APIs and turning raw SSE output into a readable summary.
 
 The repo currently covers:
 
@@ -15,36 +15,31 @@ Each example prints:
 - the request target
 - the raw streamed SSE events
 - an aggregated final response
-- metadata and usage
-- tool/function call details when present
+
+Each script is self-contained and can be copied or run independently.
 
 ## Repo Layout
 
 ```text
 .
-├── anthropic/
-│   ├── hello.sh
-│   ├── list-models.sh
-│   ├── mm.sh
-│   └── mm-tool.sh
-├── lib/
-│   ├── anthropic-messages-sse.sh
-│   ├── image-source.sh
-│   ├── openai-chat-completions-sse.sh
-│   └── openai-responses-sse.sh
-├── openai/
-│   ├── list-models.sh
-│   ├── chat-completions/
-│   │   ├── hello.sh
-│   │   ├── mm.sh
-│   │   ├── mm-tool.sh
-│   │   └── system-last.sh
-│   └── responses/
-│       ├── hello.sh
-│       ├── mm.sh
-│       └── mm-tool.sh
-└── resources/
-    └── Sydney-Opera-House.jpg
+├── hello/
+│   ├── anthropic.sh
+│   ├── openai-chat.sh
+│   └── openai-responses.sh
+├── list-models/
+│   ├── anthropic.sh
+│   └── openai.sh
+├── multimodal/
+│   ├── anthropic.sh
+│   ├── openai-chat.sh
+│   └── openai-responses.sh
+├── multimodal-tool/
+│   ├── anthropic.sh
+│   ├── openai-chat.sh
+│   └── openai-responses.sh
+└── system-last/
+    ├── openai-chat.sh
+    └── openai-responses.sh
 ```
 
 ## Requirements
@@ -55,122 +50,104 @@ Each example prints:
 - `file` for local/remote image MIME detection in multimodal examples
 - `base64` for multimodal examples
 
-## Environment Variables
+## Arguments
 
-All scripts expect these variables:
+Scripts take all inputs as explicit command-line arguments.
 
-- `BASE_URL`: provider base URL including the version prefix, for example `https://api.openai.com/v1`
-- `API_KEY`: provider API key
-- `MODEL`: model name to send in generation requests
+Text generation scripts:
 
-`MODEL` is not required for the `list-models.sh` scripts.
-
-Optional generation variables:
-
-- `ENABLE_THINKING`: defaults to `false`. Set `1`, `true`, `yes`, or `on` to request thinking/reasoning output.
-
-Examples:
-
-```bash
-export BASE_URL=https://api.openai.com/v1 && \
-export API_KEY=your_api_key && \
-export MODEL=gpt-4.1
+```text
+bash <script>.sh -u <url> -k <key> -m <model> [-e <json>] [-s|--skip-ssl]
 ```
 
-```bash
-export BASE_URL=https://api.anthropic.com/v1
-export API_KEY=your_api_key
-export MODEL=claude-sonnet-4-0
+Multimodal scripts:
+
+```text
+bash <script>.sh -u <url> -k <key> -m <model> -i <image> [-e <json>] [-s|--skip-ssl]
 ```
 
-You can also point `BASE_URL` at a compatible local gateway, for example:
+List-models scripts:
 
-```bash
-export BASE_URL=http://localhost:10000/v1
-export API_KEY=xxx
-export MODEL=Qwen3.5-4B
+```text
+bash <script>.sh -u <url> -k <key> [-s|--skip-ssl]
 ```
 
-Thinking examples:
+All scripts print usage help when run with no arguments or with `-h` / `--help`.
 
-```bash
-ENABLE_THINKING=1 bash openai/chat-completions/hello.sh
-```
+Arguments:
 
-```bash
-ENABLE_THINKING=1 bash anthropic/hello.sh
-```
+- `-u, --url`: provider base URL including the version prefix, for example `https://api.openai.com/v1`
+- `-k, --key`: provider API key
+- `-m, --model`: model name to send in generation requests
+- `-i, --image`: local file path or `http(s)` URL for multimodal scripts
+- `-e, --extra-args`: optional JSON object string merged into the request body and passed through to the API. It defaults to `{}`.
+- `-s, --skip-ssl`: optional flag that skips TLS certificate verification for API requests and remote image downloads.
+
+You can point `--url` at a compatible local gateway, for example `http://localhost:10000/v1`.
+
+There is intentionally no default image for multimodal scripts.
 
 ## Quick Start
 
 Run commands from the repo root:
 
 ```bash
-bash openai/chat-completions/hello.sh
+bash hello/openai-chat.sh -u https://api.openai.com/v1 -k your_api_key -m gpt-4.1
 ```
 
 ```bash
-bash openai/responses/hello.sh
+bash hello/openai-responses.sh -u https://api.openai.com/v1 -k your_api_key -m gpt-4.1
 ```
 
 ```bash
-bash openai/list-models.sh
+bash list-models/openai.sh -u https://api.openai.com/v1 -k your_api_key
 ```
 
 ```bash
-bash anthropic/hello.sh
+bash hello/anthropic.sh -u https://api.anthropic.com/v1 -k your_api_key -m claude-sonnet-4-0
 ```
 
 ```bash
-bash anthropic/list-models.sh
+bash list-models/anthropic.sh -u https://api.anthropic.com/v1 -k your_api_key
 ```
 
 ## Scripts
 
-### OpenAI
-
-- `openai/list-models.sh`
-  Lists models from `${BASE_URL}/models` using OpenAI bearer auth.
-
-### OpenAI Chat Completions
-
-- `openai/chat-completions/hello.sh`
-  Text-only streaming request to `${BASE_URL}/chat/completions`.
-- `openai/chat-completions/mm.sh`
-  Simulates an image-reading workflow where the image is sent in a later `user` message.
-- `openai/chat-completions/mm-tool.sh`
-  Simulates the same workflow, but returns the image in a `tool` message.
-- `openai/chat-completions/system-last.sh`
-  Text-only streaming request that intentionally places the `system` message last in `messages`.
-
-### OpenAI Responses
-
-- `openai/responses/hello.sh`
-  Text-only streaming request to `${BASE_URL}/responses`.
-- `openai/responses/mm.sh`
+- `list-models/openai.sh`
+  Lists models from `<url>/models` using OpenAI bearer auth.
+- `list-models/anthropic.sh`
+  Lists models from `<url>/models` using Anthropic auth/version headers.
+- `hello/openai-chat.sh`
+  Text-only streaming request to `<url>/chat/completions`.
+- `hello/openai-responses.sh`
+  Text-only streaming request to `<url>/responses`.
+- `hello/anthropic.sh`
+  Text-only streaming request to `<url>/messages`.
+- `multimodal/openai-chat.sh`
+  Sends multimodal user input with OpenAI Chat `image_url` content.
+- `multimodal/openai-responses.sh`
   Sends multimodal user input with `input_text` and `input_image`.
-- `openai/responses/mm-tool.sh`
-  Simulates a `function_call` followed by `function_call_output` containing text plus an image.
-
-### Anthropic Messages
-
-- `anthropic/list-models.sh`
-  Lists models from `${BASE_URL}/models` using Anthropic auth/version headers.
-- `anthropic/hello.sh`
-  Text-only streaming request to `${BASE_URL}/messages`.
-- `anthropic/mm.sh`
+- `multimodal/anthropic.sh`
   Sends a user message with text plus a base64-encoded image block.
-- `anthropic/mm-tool.sh`
-  Simulates a `tool_use` followed by a `tool_result` containing text plus an image.
+- `multimodal-tool/openai-chat.sh`
+  Simulates `assistant.tool_calls` followed by a `tool` message containing text plus an image.
+- `multimodal-tool/openai-responses.sh`
+  Simulates a `function_call` followed by `function_call_output` containing text plus an image.
+- `multimodal-tool/anthropic.sh`
+  Simulates an assistant `tool_use` followed by a matching user `tool_result` containing text plus an image.
+- `system-last/openai-chat.sh`
+  Text-only streaming request that intentionally places the `system` message last in Chat Completions `messages`.
+- `system-last/openai-responses.sh`
+  Text-only streaming request that intentionally places the `system` message last in Responses API `input`.
 
 ## Multimodal Notes
 
-- Multimodal examples set `IMAGE` inside each script.
-- `IMAGE` can be a local file path or an `http(s)` URL.
-- Remote images are downloaded and converted to base64 by [`lib/image-source.sh`](lib/image-source.sh).
-- Some examples use the bundled [`resources/Sydney-Opera-House.jpg`](resources/Sydney-Opera-House.jpg), so running from the repo root is the safest default.
-
-If you want to swap the sample image, edit the `IMAGE=...` line in the relevant script.
+- Multimodal scripts require the `<image>` argument.
+- `<image>` can be a local file path or an `http(s)` URL.
+- Remote images are downloaded and converted to base64 by code inside each multimodal script.
+- Quote remote image URLs that contain shell metacharacters such as `&`, `?`, or `#`.
+  Otherwise the shell may run the script in the background before the full URL is passed.
+- There is no default image.
 
 ## Output Shape
 
@@ -179,12 +156,7 @@ Most scripts print sections in this order:
 1. `=== Request ===`
 2. `=== Raw Stream ===`
 3. `=== Aggregated LLM Response ===`
-4. `=== Metadata ===`
-5. `=== Usage ===`
-6. `=== Tool Calls ===`, `=== Function Calls ===`, or `=== Tool Uses ===`
 
-The parsing helpers in [`lib/openai-chat-completions-sse.sh`](lib/openai-chat-completions-sse.sh), [`lib/openai-responses-sse.sh`](lib/openai-responses-sse.sh), and [`lib/anthropic-messages-sse.sh`](lib/anthropic-messages-sse.sh) collapse raw SSE events into a single summary JSON object before printing the readable sections.
+Each streaming script contains its own SSE parsing code and image handling code.
 
-All generation scripts send exactly these thinking-control fields in the request body: `enable_thinking` and `chat_template_kwargs.enable_thinking`. The default value is `false`, and setting `ENABLE_THINKING=1` switches both to `true`.
-
-The `list-models.sh` scripts are non-streaming and print `=== Raw Response ===`, `=== Models ===`, and `=== Metadata ===` instead.
+The `list-models` scripts are non-streaming and print `=== Raw Response ===`, pretty-printed model JSON under `=== Models ===`, and `Model Count`.

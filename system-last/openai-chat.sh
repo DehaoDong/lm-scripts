@@ -1,4 +1,95 @@
 #!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL=""
+API_KEY=""
+MODEL=""
+EXTRA_ARGS="{}"
+CURL_SKIP_SSL_ARGS=()
+
+print_help() {
+  cat <<EOF
+Usage:
+  bash ${BASH_SOURCE[0]} -u <url> -k <key> -m <model> [-e <json>] [-s|--skip-ssl]
+
+Options:
+  -u, --url <url>          OpenAI-compatible API base URL, including the version prefix.
+                           Example: https://api.openai.com/v1
+  -k, --key <key>          API key used as the Bearer token.
+  -m, --model <model>      Model name.
+  -e, --extra-args <json>  Optional JSON object merged into the request body.
+                           Example: '{"temperature":0}'
+  -s, --skip-ssl           Skip TLS certificate verification.
+  -h, --help               Show this help.
+
+Examples:
+  bash ${BASH_SOURCE[0]} -u https://api.openai.com/v1 -k sk-... -m gpt-4.1
+  bash ${BASH_SOURCE[0]} --url http://localhost:10000/v1 --key dummy-key --model example-model --extra-args '{"temperature":0}' --skip-ssl
+EOF
+}
+
+if [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  print_help
+  exit 0
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -u|--url)
+      BASE_URL="${2:-}"
+      shift 2
+      ;;
+    -k|--key)
+      API_KEY="${2:-}"
+      shift 2
+      ;;
+    -m|--model)
+      MODEL="${2:-}"
+      shift 2
+      ;;
+    -e|--extra-args)
+      EXTRA_ARGS="${2:-}"
+      shift 2
+      ;;
+    -s|--skip-ssl)
+      CURL_SKIP_SSL_ARGS=(--insecure)
+      shift
+      ;;
+    -h|--help)
+      print_help
+      exit 0
+      ;;
+    *)
+      echo "[error] Unknown argument: $1" >&2
+      echo >&2
+      print_help >&2
+      exit 1
+      ;;
+  esac
+done
+
+require_bin() {
+  local bin="$1"
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    echo "[error] Missing dependency: $bin" >&2
+    exit 1
+  fi
+}
+
+require_arg() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "[error] Missing required argument: ${name}" >&2
+    exit 1
+  fi
+}
+
+validate_extra_args() {
+  if ! printf '%s\n' "$EXTRA_ARGS" | jq -e 'type == "object"' >/dev/null; then
+    echo "[error] EXTRA_ARGS must be a JSON object string, for example: {\"temperature\":0}" >&2
+    exit 1
+  fi
+}
 
 openai_chat_completions_sse_to_summary() {
   local raw_stream_file="${1:?raw stream file is required}"
@@ -52,7 +143,7 @@ openai_chat_completions_sse_to_summary() {
 
     def reasoning_from_parts:
       if . == null then ""
-      elif type == "string" then ""
+      elif type == "string" then .
       elif type == "array" then
         [
           .[] |
@@ -78,13 +169,6 @@ openai_chat_completions_sse_to_summary() {
 
     reduce .[] as $chunk (
       {
-        id: null,
-        object: null,
-        created: null,
-        model: null,
-        service_tier: null,
-        system_fingerprint: null,
-        role: null,
         content: "",
         reasoning: "",
         refusal: "",
@@ -93,17 +177,9 @@ openai_chat_completions_sse_to_summary() {
         tool_calls: {}
       };
 
-      .id = (.id // $chunk.id) |
-      .object = (.object // $chunk.object) |
-      .created = (.created // $chunk.created) |
-      .model = (.model // $chunk.model) |
-      .service_tier = (.service_tier // $chunk.service_tier) |
-      .system_fingerprint = (.system_fingerprint // $chunk.system_fingerprint) |
       .usage = ($chunk.usage // .usage) |
-
       if ($chunk.choices | type) == "array" then
         reduce $chunk.choices[] as $choice (.;
-          .role = ($choice.delta.role // .role) |
           .content += ($choice.delta.content | text_from_parts) |
           .reasoning += (
             ($choice.delta.reasoning_content | as_text) +
@@ -154,36 +230,80 @@ openai_chat_completions_print_aggregated_response() {
     .reasoning as $reasoning
     | .content as $content
     | if ($reasoning | length) > 0 then
-        "<thinking>\n" + $reasoning + "\n</thinking>\n\n" + $content
+        "<think>\n" + $reasoning + "\n</think>\n\n" + $content
       else
         $content
       end
   '
 }
 
-openai_chat_completions_print_metadata() {
-  local summary_json="${1:?summary json is required}"
 
-  printf '%s\n' "$summary_json" | jq '{
-    id,
-    object,
-    created,
-    model,
-    role,
-    finish_reason,
-    service_tier,
-    system_fingerprint
-  }'
+require_bin curl
+require_bin jq
+require_arg BASE_URL
+require_arg API_KEY
+require_arg MODEL
+validate_extra_args
+
+PAYLOAD_FILE="$(mktemp /tmp/chat_completions_payload_XXXXXX.json)"
+RAW_STREAM_FILE="$(mktemp /tmp/chat_completions_stream_XXXXXX.log)"
+HEADERS_FILE="$(mktemp /tmp/chat_completions_headers_XXXXXX.log)"
+cleanup() {
+  rm -f "$PAYLOAD_FILE" "$RAW_STREAM_FILE" "$HEADERS_FILE"
 }
+trap cleanup EXIT
 
-openai_chat_completions_print_usage() {
-  local summary_json="${1:?summary json is required}"
+# This example intentionally places the system message last in the array.
+jq -n \
+  --arg model "$MODEL" \
+  --argjson extra_args "$EXTRA_ARGS" \
+  '
+  ({
+    model: $model,
+    stream: true,
+    stream_options: {
+      include_usage: true
+    },
+    messages: [
+      {
+        role: "user",
+        content: "Hi"
+      },
+      {
+        role: "system",
+        content: "Add a prefix SYSTEM_LAST to all your responses. "
+      }
+    ]
+  } + $extra_args)
+  ' > "$PAYLOAD_FILE"
 
-  printf '%s\n' "$summary_json" | jq '.usage'
-}
+echo "=== Request ==="
+echo "Endpoint          : ${BASE_URL}/chat/completions"
+echo "Model             : ${MODEL}"
+echo "Extra Args        : ${EXTRA_ARGS}"
+echo
 
-openai_chat_completions_print_tool_calls() {
-  local summary_json="${1:?summary json is required}"
+echo "=== Raw Stream ==="
+curl "${CURL_SKIP_SSL_ARGS[@]}" -sS -N \
+  -D "$HEADERS_FILE" \
+  -o >(tee "$RAW_STREAM_FILE") \
+  "${BASE_URL}/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ${API_KEY}" \
+  -d @"$PAYLOAD_FILE"
+echo
+echo
 
-  printf '%s\n' "$summary_json" | jq '.tool_calls'
-}
+HTTP_CODE="$(awk 'toupper($1) ~ /^HTTP/ { code = $2 } END { print code }' "$HEADERS_FILE")"
+
+if [[ ! "$HTTP_CODE" =~ ^2 ]]; then
+  echo "[error] HTTP ${HTTP_CODE}" >&2
+  exit 1
+fi
+
+SUMMARY_JSON="$(openai_chat_completions_sse_to_summary "$RAW_STREAM_FILE")"
+
+echo "=== Aggregated LLM Response ==="
+openai_chat_completions_print_aggregated_response "$SUMMARY_JSON"
+echo
+echo
